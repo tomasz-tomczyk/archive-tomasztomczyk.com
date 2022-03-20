@@ -1,0 +1,9 @@
+---
+layout: _layout.slime
+---
+
+<div class="">
+Hello world
+</div>
+
+<%= include(@env, "_includes/footer.eex") %>
