@@ -4,6 +4,7 @@ tag:
   - posts
 title: A modern Elixir pipeline for GitLab
 permalink: 2019/04/27/modern-elixir-pipeline-for-gitlab.html
+excerpt: I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.
 ---
 
 I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.
@@ -131,7 +132,7 @@ deploy:production:
     - develop
 ```
 
-### Step by step
+## Step by step
 
 ```yaml
 image: elixir:1.10.2-alpine
@@ -309,7 +310,7 @@ In general, your Docker / deployment steps will be quite custom to your project 
 
 You can use the `CI_COMMIT_SHORT_SHA` variable to tag your images easily.
 
-### Deployment
+## Deployment
 
 I did not include much details in the deployment steps as it largely depends on how you operate. General advice that might be useful:
 
@@ -341,7 +342,7 @@ only:
 
 Finally, consider only allowing production deployments from your `develop` or `master` branch.
 
-### Dockerfile
+## Dockerfile
 
 Given you have a binary made in the release step, your `Dockerfile` can be as simple as the following:
 

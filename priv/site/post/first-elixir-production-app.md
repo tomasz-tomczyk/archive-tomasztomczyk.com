@@ -4,6 +4,7 @@ tag:
   - posts
 title: First Elixir production app
 permalink: 2016/11/07/first-elixir-production-app.html
+excerpt: I’ve recently got into Elixir and it’s been an absolute blast - the vibe I get is similar to when I finally caved in to embracing Ruby after a decade of working with PHP; only this time it doesn’t feel like I’m lagging behind.
 ---
 
 I've recently got into Elixir and it's been an absolute blast - the vibe I get is similar to when I finally caved in to embracing Ruby after a decade of working with PHP; only this time it doesn't feel like I'm lagging behind. Now is an excellent time to get started with Elixir - it's early enough that there's a lot of room for improvements, open source contributions, learning what's possible without being completely overwhelmed by what's out there (as may be the case with, say, Gem eco-system). The community is small enough that you'll soon start recognising the names of people who help on Slack as they're mentioned on podcasts, or see their replies on Stack Overflow. That feels really great, being able to put a name to a face you've seen at a conference, to all those Slack messages or posts. It really makes you appreciate the open source community more, when these contributors become more real to you this way.

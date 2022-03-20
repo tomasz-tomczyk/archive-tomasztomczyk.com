@@ -4,6 +4,7 @@ tag:
   - posts
 title: GenStage for processing Jobs
 permalink: 2017/01/17/genstage-for-processing-jobs.html
+excerpt: We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this
 ---
 
 We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this:
@@ -16,7 +17,7 @@ This works great, but one of the issues we found is that this is a very greedy a
 
 It's clear we needed an alternative approach. Our first hotfix was to sleep for a few seconds after step 2, giving processes enough time to finish. We would then spin up multiples of the application to handle the load and minimise the effect of the artificial delay. Messy, but works.
 
-### GenStage
+## GenStage
 
 This sounded like an excellent problem for GenStage; there's a Producer (SQS) and Consumer (form processor). The first iteration looked something like this:
 
@@ -63,7 +64,7 @@ When Consumers are started, they subscribe to the Producer and send demand for e
 
 Unfortunately, if the long-running SQS request does not return anything (and in our case upper limit of 20s is reached), the demand is never fulfilled -- Another request is never created.
 
-#### Continous polling for messages
+## Continous polling for messages
 
 The [GenStage documentation](https://hexdocs.pm/gen_stage/GenStage.html) covers this scenario by using BroadcastDispatcher and keeping a queue and demand in the state of the producer. One part didn't quite fit our setup - having to manually call `sync_notify` to send events. We needed a way to continously request data and send it to Consumers if we received any messages.
 
@@ -87,7 +88,7 @@ end
 
 When Consumers start, they call `handle_demand` which then starts a recursive loop; either returning some messages from SQS or empty list; those are passed to the Consumer and the whole thing works.
 
-#### Rate-limiting
+## Rate-limiting
 
 The problem with the above is that if a traffic spike occurs, we'll continue to spawn new tasks until we run out of memory. To solve this, we've implemented DynamicSupervisor as the Consumer (in GenStage v0.11.0 renamed to [ConsumerSupervisor](https://hexdocs.pm/gen_stage/ConsumerSupervisor.html#content)). This allows us to specify `:max_demand` which dictates how many child processes can spawn.
 
@@ -177,7 +178,7 @@ def start(_type, _args) do
 end
 ```
 
-#### Cast vs send()
+## Cast vs send()
 
 It's possible that [GenStage.cast/2](https://hexdocs.pm/gen_stage/GenStage.html#cast/2) is not the best choice for the GenStage process to send messages to itself. Perhaps it's more suitable for external processes - while you can use [Kernel.send/2](https://hexdocs.pm/elixir/Kernel.html#send/2) internally.
 
@@ -202,7 +203,7 @@ end
 
 As far as we could tell, the behaviour is the same.
 
-### Summary
+## Summary
 
 There's a lot of moving parts to this architecture:
 
