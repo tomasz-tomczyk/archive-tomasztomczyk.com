@@ -1,0 +1,16 @@
+---
+title: "Still"
+---
+doctype html
+html
+  head
+    title Still
+    meta charset="UTF-8"
+    meta name="viewport" content="width=device-width, initial-scale=1.0"
+    = link_to_css "css/output.css", media: "all"
+  body.dark:bg-gray-900.dark:text-neutral-400.bg-gray-200.text-neutral-600
+    main.container.mx-auto.mt-16
+      h1.font-bold.text-xl.leading-none.text-gray-900.dark:text-gray-100.mb-2 Tomasz Tomczyk
+      p.pb-8.w-96 I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.
+
+      = @children
