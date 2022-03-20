@@ -1,11 +1,14 @@
 ---
-layout: post
+layout: _post_layout.slime
+tag:
+  - posts
 title: A modern Elixir pipeline for GitLab
+permalink: 2019/04/27/modern-elixir-pipeline-for-gitlab.html
 ---
 
 I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.
 
-<amp-img width="2296" height="642" layout="responsive" src="/assets/images/posts/gitlab-pipeline.png"></amp-img>
+<%= responsive_image("assets/images/posts/gitlab-pipeline.png") %>
 
 First, let's take a look at the whole finished file and I'll explain my reasoning step by step below.
 
@@ -26,8 +29,7 @@ stages:
 
 compile:
   stage: build
-  before_script:
-    *setup
+  before_script: *setup
   variables:
     MIX_ENV: "test"
   script:
@@ -49,8 +51,7 @@ compile:
 
 test:
   stage: test
-  before_script:
-    *setup
+  before_script: *setup
   services:
     - postgres:latest
   variables:
@@ -66,8 +67,7 @@ test:
 
 credo:
   stage: test
-  before_script:
-    *setup
+  before_script: *setup
   variables:
     MIX_ENV: "test"
   script:
@@ -75,8 +75,7 @@ credo:
 
 seeds:
   stage: test
-  before_script:
-    *setup
+  before_script: *setup
   services:
     - postgres:latest
   variables:
@@ -90,8 +89,7 @@ seeds:
 
 release:
   stage: release
-  before_script:
-    *setup
+  before_script: *setup
   variables:
     MIX_ENV: "prod"
   script:
@@ -122,15 +120,13 @@ deploy:staging:
   extends: .deploy
   environment: staging
   when: manual
-  variables:
-    ...
+  variables: ...
 
 deploy:production:
   extends: .deploy
   environment: production
   when: manual
-  variables:
-    ...
+  variables: ...
   only:
     - develop
 ```
@@ -177,34 +173,34 @@ compile:
 Here's how we use the previously defined setup stage. You'll see this repeated a few times.
 
 ```yaml
-  variables:
-    MIX_ENV: "test"
-  script:
-    - mix deps.get
-    - mix do clean --only=test, format --check-formatted, compile --warnings-as-errors
+variables:
+  MIX_ENV: "test"
+script:
+  - mix deps.get
+  - mix do clean --only=test, format --check-formatted, compile --warnings-as-errors
 ```
 
 Here's where we fetch the depndencies and a check that the code has been formatted before compiling it. The main reason for the `MIX_ENV` setting there is so that the work here can be reused in the subsequent steps - where we run our tests. During the release step, we'll build a binary for production environment using releases.
 
 ```yaml
-  artifacts:
-    paths:
-      - _build
-      - deps
-    untracked: true
+artifacts:
+  paths:
+    - _build
+    - deps
+  untracked: true
 ```
 
 Artifacts allow you to keep files in between pipeline stages - read more about [dependencies on GitLab](https://docs.gitlab.com/ee/ci/yaml/#dependencies). It's important to specify that we're interested in keeping the `untracked` files, as otherwise GitLab will follow your `.gitignore` file and you likely have all of those paths ignored. These will be used to speed up the next steps of the pipeline.
 
 ```yaml
-  cache:
-    untracked: true
-    key:
-      files:
-        - mix.lock
-    paths:
-      - deps
-      - _build
+cache:
+  untracked: true
+  key:
+    files:
+      - mix.lock
+  paths:
+    - deps
+    - _build
 ```
 
 In addition to artifacts, we specify a cache here for the same paths. Cache is kept between entire pipeline executions - it helps to speed it up again. The `files` key allows you to specify a file to be used as a key for the cache. Any time we update any of our packages, cache will be rebuilt. See more about [`cache:key:files` on GitLab](https://docs.gitlab.com/ee/ci/yaml/#cachekeyfiles).
@@ -294,19 +290,19 @@ docker:
 We switch from using an Elixir Docker image to a Docker with git image. This is because we've now got everything we needed from Elixir, we have the final binary in place.
 
 ```yaml
-  dependencies:
-    - release
+dependencies:
+  - release
 ```
 
 If we didn't specify that we specifically depend on the `release` stage, all previous artifacts would be downloaded - this is a minor improvement.
 
 ```yaml
-  services:
-    - docker:19.03-dind
-  script:
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build --build-arg APP_NAME=${APP_NAME} -t "$(APP_NAME):${CI_COMMIT_SHORT_SHA}" .
-    - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
+services:
+  - docker:19.03-dind
+script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  - docker build --build-arg APP_NAME=${APP_NAME} -t "$(APP_NAME):${CI_COMMIT_SHORT_SHA}" .
+  - docker push "${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}"
 ```
 
 In general, your Docker / deployment steps will be quite custom to your project & company. I'd suggest keeping it simple - you can use the GitLab registry to store the images. `APP_NAME` is something you can specify in your pipeline environment variables, so that it's easier to reuse the whole pipeline file between projects and make changes.
@@ -322,25 +318,25 @@ I did not include much details in the deployment steps as it largely depends on 
   stage: deploy
   script:
     # Deployment specific steps
-````
+```
 
- I would suggest trying to keep staging & production deployment steps as similar as you can - having a reusable anchor helps
+I would suggest trying to keep staging & production deployment steps as similar as you can - having a reusable anchor helps
 
 ```yaml
-  environment: staging
+environment: staging
 ```
 
 Specifying `environment` key here allows your pipeline to pull environment specific values from your repo's configuration - see more about [variables on GitLab](https://docs.gitlab.com/ee/ci/variables/).
 
- ```
-   when: manual
+```
+  when: manual
 ```
 
 Thanks to this you can use GitLab Pipeline UI as your deployment tool.
 
 ```yaml
-  only:
-    - develop
+only:
+  - develop
 ```
 
 Finally, consider only allowing production deployments from your `develop` or `master` branch.

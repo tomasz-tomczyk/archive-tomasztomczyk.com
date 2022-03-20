@@ -1,4 +1,4 @@
-<footer class="border-t-4 border-gray-300 dark:border-gray-800 dark:text-gray-400 mt-8 pt-8">
+<footer class="border-t-4 border-gray-300 dark:border-gray-800 dark:text-gray-400 my-8 pt-8">
   <nav>
     <ul>
       <li class="inline"><a href="https://github.com/tomasz-tomczyk" class="hover:text-gray-900 dark:hover:text-gray-200" target="_blank">

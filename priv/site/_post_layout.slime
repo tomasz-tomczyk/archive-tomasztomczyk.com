@@ -1,0 +1,6 @@
+---
+layout: _layout.slime
+---
+
+h1.font-bold.text-2xl.leading-none.text-gray-900.dark:text-gray-100.mb-2 = @title
+main.lg:w-2/3 = @children

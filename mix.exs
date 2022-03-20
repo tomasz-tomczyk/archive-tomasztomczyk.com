@@ -28,7 +28,7 @@ defmodule Tomasztomczyk.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:still, "~> 0.6.1"}
+      {:still, github: "still-ex/still", ref: "master", override: true}
     ]
   end
 end

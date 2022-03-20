@@ -1,0 +1,7 @@
+---
+layout: _layout.slime
+---
+
+ul
+  = Enum.map get_collections(@env, "posts"), fn x ->
+    = link @env, x[:metadata][:title], to: x[:output_file]

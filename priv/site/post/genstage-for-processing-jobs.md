@@ -1,6 +1,9 @@
 ---
-layout: post
-title: GenStage for processing jobs
+layout: _post_layout.slime
+tag:
+  - posts
+title: GenStage for processing Jobs
+permalink: 2017/01/17/genstage-for-processing-jobs.html
 ---
 
 We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this:
@@ -56,15 +59,15 @@ defmodule Consumer do
 end
 ```
 
-When Consumers are started, they subscribe to the Producer and send demand for events. The ```handle_demand``` callback is called, SQS retrieves messages and passes them over to ```handle_events``` in Consumer, which in turn starts the individual Tasks to process jobs.
+When Consumers are started, they subscribe to the Producer and send demand for events. The `handle_demand` callback is called, SQS retrieves messages and passes them over to `handle_events` in Consumer, which in turn starts the individual Tasks to process jobs.
 
 Unfortunately, if the long-running SQS request does not return anything (and in our case upper limit of 20s is reached), the demand is never fulfilled -- Another request is never created.
 
 #### Continous polling for messages
 
-The [GenStage documentation](https://hexdocs.pm/gen_stage/GenStage.html) covers this scenario by using BroadcastDispatcher and keeping a queue and demand in the state of the producer. One part didn't quite fit our setup - having to manually call ```sync_notify``` to send events. We needed a way to continously request data and send it to Consumers if we received any messages.
+The [GenStage documentation](https://hexdocs.pm/gen_stage/GenStage.html) covers this scenario by using BroadcastDispatcher and keeping a queue and demand in the state of the producer. One part didn't quite fit our setup - having to manually call `sync_notify` to send events. We needed a way to continously request data and send it to Consumers if we received any messages.
 
-The solution to that is to create a callback with ```handle_cast``` that calls itself recursively and call it once at startup:
+The solution to that is to create a callback with `handle_cast` that calls itself recursively and call it once at startup:
 
 ```elixir
 def handle_cast(:check_for_messages, state) do
@@ -82,11 +85,11 @@ def handle_demand(demand, state) do
 end
 ```
 
-When Consumers start, they call ```handle_demand``` which then starts a recursive loop; either returning some messages from SQS or empty list; those are passed to the Consumer and the whole thing works.
+When Consumers start, they call `handle_demand` which then starts a recursive loop; either returning some messages from SQS or empty list; those are passed to the Consumer and the whole thing works.
 
 #### Rate-limiting
 
-The problem with the above is that if a traffic spike occurs, we'll continue to spawn new tasks until we run out of memory. To solve this, we've implemented DynamicSupervisor as the Consumer (in GenStage v0.11.0 renamed to [ConsumerSupervisor](https://hexdocs.pm/gen_stage/ConsumerSupervisor.html#content)). This allows us to specify ```:max_demand``` which dictates how many child processes can spawn.
+The problem with the above is that if a traffic spike occurs, we'll continue to spawn new tasks until we run out of memory. To solve this, we've implemented DynamicSupervisor as the Consumer (in GenStage v0.11.0 renamed to [ConsumerSupervisor](https://hexdocs.pm/gen_stage/ConsumerSupervisor.html#content)). This allows us to specify `:max_demand` which dictates how many child processes can spawn.
 
 In turn, the Producer doesn't know about this limit, so it will continue polling SQS and send events. Once max_demand is reached, it will start filling the internal buffer. In our case, we didn't want messages to be read from the queue until we knew we had the capacity to process them (as another instance of the application might be able to read them). By keeping the number of current demand from Consumers in Producer's state, we only request data from SQS when demand is there.
 
