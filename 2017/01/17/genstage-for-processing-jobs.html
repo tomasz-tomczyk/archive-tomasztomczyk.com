@@ -1,5 +1,5 @@
-<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-IBMtMSY4EnsGezxBQo9jvg==.css" />
-</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="font-bold text-xl leading-none text-gray-900 dark:text-gray-100 mb-2">Tomasz Tomczyk</h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">GenStage for processing Jobs</h1><main class="lg:w-2/3"><p>We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this:</p>
+<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-oN9kDQa1APEtXLIY5Xg6NQ==.css" />
+</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="mb-2"><a href="/" class="font-bold text-3xl leading-none text-gray-900 dark:text-gray-100 ">Tomasz Tomczyk</a></h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400 text-lg">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">GenStage for processing Jobs</h1><main class="lg:w-2/3"><p>We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this:</p>
 
 <ol>
 <li>Long-running SQS request, as soon as a message is available, the request returns</li>
@@ -11,7 +11,7 @@
 
 <p>It&#39;s clear we needed an alternative approach. Our first hotfix was to sleep for a few seconds after step 2, giving processes enough time to finish. We would then spin up multiples of the application to handle the load and minimise the effect of the artificial delay. Messy, but works.</p>
 
-<h3>GenStage</h3>
+<h2>GenStage</h2>
 
 <p>This sounded like an excellent problem for GenStage; there&#39;s a Producer (SQS) and Consumer (form processor). The first iteration looked something like this:</p>
 
@@ -57,7 +57,7 @@ end
 
 <p>Unfortunately, if the long-running SQS request does not return anything (and in our case upper limit of 20s is reached), the demand is never fulfilled -- Another request is never created.</p>
 
-<h4>Continous polling for messages</h4>
+<h2>Continous polling for messages</h2>
 
 <p>The <a href="https://hexdocs.pm/gen_stage/GenStage.html">GenStage documentation</a> covers this scenario by using BroadcastDispatcher and keeping a queue and demand in the state of the producer. One part didn&#39;t quite fit our setup - having to manually call <code>sync_notify</code> to send events. We needed a way to continously request data and send it to Consumers if we received any messages.</p>
 
@@ -80,7 +80,7 @@ end
 
 <p>When Consumers start, they call <code>handle_demand</code> which then starts a recursive loop; either returning some messages from SQS or empty list; those are passed to the Consumer and the whole thing works.</p>
 
-<h4>Rate-limiting</h4>
+<h2>Rate-limiting</h2>
 
 <p>The problem with the above is that if a traffic spike occurs, we&#39;ll continue to spawn new tasks until we run out of memory. To solve this, we&#39;ve implemented DynamicSupervisor as the Consumer (in GenStage v0.11.0 renamed to <a href="https://hexdocs.pm/gen_stage/ConsumerSupervisor.html#content">ConsumerSupervisor</a>). This allows us to specify <code>:max_demand</code> which dictates how many child processes can spawn.</p>
 
@@ -168,7 +168,7 @@ end
 end
 </code></pre>
 
-<h4>Cast vs send()</h4>
+<h2>Cast vs send()</h2>
 
 <p>It&#39;s possible that <a href="https://hexdocs.pm/gen_stage/GenStage.html#cast/2">GenStage.cast/2</a> is not the best choice for the GenStage process to send messages to itself. Perhaps it&#39;s more suitable for external processes - while you can use <a href="https://hexdocs.pm/elixir/Kernel.html#send/2">Kernel.send/2</a> internally.</p>
 
@@ -192,7 +192,7 @@ end
 
 <p>As far as we could tell, the behaviour is the same.</p>
 
-<h3>Summary</h3>
+<h2>Summary</h2>
 
 <p>There&#39;s a lot of moving parts to this architecture:</p>
 

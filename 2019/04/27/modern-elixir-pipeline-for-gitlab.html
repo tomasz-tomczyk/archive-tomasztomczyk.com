@@ -1,5 +1,5 @@
-<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-IBMtMSY4EnsGezxBQo9jvg==.css" />
-</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="font-bold text-xl leading-none text-gray-900 dark:text-gray-100 mb-2">Tomasz Tomczyk</h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">A modern Elixir pipeline for GitLab</h1><main class="lg:w-2/3"><p>I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.</p>
+<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-oN9kDQa1APEtXLIY5Xg6NQ==.css" />
+</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="mb-2"><a href="/" class="font-bold text-3xl leading-none text-gray-900 dark:text-gray-100 ">Tomasz Tomczyk</a></h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400 text-lg">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">A modern Elixir pipeline for GitLab</h1><main class="lg:w-2/3"><p>I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.</p>
 
 <p><img src="/assets/images/posts/gitlab-pipeline-25224860-2296w.png" srcset="/assets/images/posts/gitlab-pipeline-25224860-574w.png 574w, /assets/images/posts/gitlab-pipeline-25224860-1148w.png 1148w, /assets/images/posts/gitlab-pipeline-25224860-1722w.png 1722w, /assets/images/posts/gitlab-pipeline-25224860-2296w.png 2296w"/></p>
 
@@ -123,7 +123,7 @@ deploy:production:
     - develop
 </code></pre>
 
-<h3>Step by step</h3>
+<h2>Step by step</h2>
 
 <pre><code class="language-yaml">image: elixir:1.10.2-alpine
 </code></pre>
@@ -287,7 +287,7 @@ script:
 
 <p>You can use the <code>CI_COMMIT_SHORT_SHA</code> variable to tag your images easily.</p>
 
-<h3>Deployment</h3>
+<h2>Deployment</h2>
 
 <p>I did not include much details in the deployment steps as it largely depends on how you operate. General advice that might be useful:</p>
 
@@ -315,7 +315,7 @@ script:
 
 <p>Finally, consider only allowing production deployments from your <code>develop</code> or <code>master</code> branch.</p>
 
-<h3>Dockerfile</h3>
+<h2>Dockerfile</h2>
 
 <p>Given you have a binary made in the release step, your <code>Dockerfile</code> can be as simple as the following:</p>
 
