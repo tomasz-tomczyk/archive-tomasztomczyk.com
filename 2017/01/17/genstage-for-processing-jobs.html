@@ -1,0 +1,218 @@
+<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-IBMtMSY4EnsGezxBQo9jvg==.css" />
+</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="font-bold text-xl leading-none text-gray-900 dark:text-gray-100 mb-2">Tomasz Tomczyk</h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">GenStage for processing Jobs</h1><main class="lg:w-2/3"><p>We use Elixir at uSwitch to process user-submitted forms, sending the data to a 3rd party API and parsing the output saving the results to a database. The high-level outline of the Elixir process as a recursive loop looks like this:</p>
+
+<ol>
+<li>Long-running SQS request, as soon as a message is available, the request returns</li>
+<li>For every message in the request, spawn a new process to handle it</li>
+<li>Go to 1</li>
+</ol>
+
+<p>This works great, but one of the issues we found is that this is a very greedy approach - if we received a spike in traffic, we&#39;d try to spin up a lot of processes, each consuming some memory and it&#39;s possible the whole application would crash. Thanks to Supervisors, it would recover, but because the queue only got bigger, the problem would repeat.</p>
+
+<p>It&#39;s clear we needed an alternative approach. Our first hotfix was to sleep for a few seconds after step 2, giving processes enough time to finish. We would then spin up multiples of the application to handle the load and minimise the effect of the artificial delay. Messy, but works.</p>
+
+<h3>GenStage</h3>
+
+<p>This sounded like an excellent problem for GenStage; there&#39;s a Producer (SQS) and Consumer (form processor). The first iteration looked something like this:</p>
+
+<pre><code class="language-elixir">defmodule Producer do
+  use GenStage
+
+  def start_link() do
+    GenStage.start_link(__MODULE__, :ok, name: __MODULE__)
+  end
+
+  def init(:ok) do
+    {:producer, :ok}
+  end
+
+  def handle_demand(demand, _state) do
+    messages = SQS.get_messages
+
+    {:noreply, messages, :ok}
+  end
+end
+
+defmodule Consumer do
+  use GenStage
+
+  def start_link() do
+    GenStage.start_link(__MODULE__, :ok)
+  end
+
+  def init(:ok) do
+    {:consumer, :the_state_does_not_matter, subscribe_to: [Producer]}
+  end
+
+  def handle_events(messages, _from, _state) do
+    messages
+    |&gt; Enum.map(&amp;Task.start_link(Processor, :process_message, [&amp;1]))
+
+    {:noreply, [], :the_state_does_not_matter}
+  end
+end
+</code></pre>
+
+<p>When Consumers are started, they subscribe to the Producer and send demand for events. The <code>handle_demand</code> callback is called, SQS retrieves messages and passes them over to <code>handle_events</code> in Consumer, which in turn starts the individual Tasks to process jobs.</p>
+
+<p>Unfortunately, if the long-running SQS request does not return anything (and in our case upper limit of 20s is reached), the demand is never fulfilled -- Another request is never created.</p>
+
+<h4>Continous polling for messages</h4>
+
+<p>The <a href="https://hexdocs.pm/gen_stage/GenStage.html">GenStage documentation</a> covers this scenario by using BroadcastDispatcher and keeping a queue and demand in the state of the producer. One part didn&#39;t quite fit our setup - having to manually call <code>sync_notify</code> to send events. We needed a way to continously request data and send it to Consumers if we received any messages.</p>
+
+<p>The solution to that is to create a callback with <code>handle_cast</code> that calls itself recursively and call it once at startup:</p>
+
+<pre><code class="language-elixir">def handle_cast(:check_for_messages, state) do
+  messages = SQS.get_messages
+
+  GenStage.cast(__MODULE__, :check_for_messages)
+
+  {:noreply, messages, state}
+end
+
+def handle_demand(demand, state) do
+  GenStage.cast(__MODULE__, :check_for_messages)
+
+  {:noreply, [], state}
+end
+</code></pre>
+
+<p>When Consumers start, they call <code>handle_demand</code> which then starts a recursive loop; either returning some messages from SQS or empty list; those are passed to the Consumer and the whole thing works.</p>
+
+<h4>Rate-limiting</h4>
+
+<p>The problem with the above is that if a traffic spike occurs, we&#39;ll continue to spawn new tasks until we run out of memory. To solve this, we&#39;ve implemented DynamicSupervisor as the Consumer (in GenStage v0.11.0 renamed to <a href="https://hexdocs.pm/gen_stage/ConsumerSupervisor.html#content">ConsumerSupervisor</a>). This allows us to specify <code>:max_demand</code> which dictates how many child processes can spawn.</p>
+
+<p>In turn, the Producer doesn&#39;t know about this limit, so it will continue polling SQS and send events. Once max_demand is reached, it will start filling the internal buffer. In our case, we didn&#39;t want messages to be read from the queue until we knew we had the capacity to process them (as another instance of the application might be able to read them). By keeping the number of current demand from Consumers in Producer&#39;s state, we only request data from SQS when demand is there.</p>
+
+<p>The combination of both these approaches looks like this:</p>
+
+<pre><code class="language-elixir">defmodule Producer do
+  alias Experimental.GenStage
+  use GenStage
+
+  def start_link(state) do
+    GenStage.start_link(__MODULE__, state, name: __MODULE__)
+  end
+
+  def init(state) do
+    {:producer, state}
+  end
+
+  def handle_cast(:check_for_messages, 0) do
+    {:noreply, [], 0}
+  end
+  def handle_cast(:check_messages, state) do
+    messages = SQS.get_messages
+
+    GenStage.cast(__MODULE__, :check_messages)
+
+    {:noreply, messages, state - Enum.count(messages)}
+  end
+
+  def handle_demand(demand, state) do
+    GenStage.cast(__MODULE__, :check_messages)
+
+    {:noreply, [], demand+state}
+  end
+end
+
+defmodule Consumer do
+  alias Experimental.DynamicSupervisor
+  use DynamicSupervisor
+
+  def start_link() do
+    DynamicSupervisor.start_link(__MODULE__, :ok)
+  end
+
+  def init(:ok) do
+    children = [
+      worker(Processor, [], restart: :temporary),
+    ]
+
+    {:ok, children, strategy: :one_for_one, subscribe_to: [{Producer, max_demand: 10, min_demand: 1}]}
+  end
+end
+
+defmodule Processor do
+  def start_link(message) do
+    Task.start_link(__MODULE__, :process_message, [message])
+  end
+
+  def process_message(message) do
+    # Do work here
+    Logger.debug(&quot;Sleeping for 15s&quot;)
+    :timer.sleep(15_000)
+  end
+end
+</code></pre>
+
+<p>The important part is keeping the number of available processes in state. As messages arrive, this number gets reduced. When we have 0 available processes, no SQS request is made. When the processes finish, the demand increases again.</p>
+
+<p>This would ensure that at max, we&#39;d have 10 tasks processing SQS messages. As soon as a SQS request returned messages, they&#39;d be sent to new tasks, while a new SQS request would start, so we would have no delay between them.</p>
+
+<p>It&#39;s also worth noting that our SQS request would return no more than one message at a time - otherwise we would have issues with potentially negative amount of consumers available.</p>
+
+<p>All of this would be supervised when application is booted up:</p>
+
+<pre><code class="language-elixir">def start(_type, _args) do
+  import Supervisor.Spec
+
+  children = [
+    worker(Producer, []),
+    worker(Consumer, [])
+  ]
+
+  {:ok, pid} = Supervisor.start_link(children, strategy: :one_for_one)
+end
+</code></pre>
+
+<h4>Cast vs send()</h4>
+
+<p>It&#39;s possible that <a href="https://hexdocs.pm/gen_stage/GenStage.html#cast/2">GenStage.cast/2</a> is not the best choice for the GenStage process to send messages to itself. Perhaps it&#39;s more suitable for external processes - while you can use <a href="https://hexdocs.pm/elixir/Kernel.html#send/2">Kernel.send/2</a> internally.</p>
+
+<pre><code class="language-elixir">def handle_info(:check_messages, 0), do: {:noreply, [], 0}
+def handle_info(:check_messages, state) do
+  Logger.debug(&quot;Reading from SQS... got #{state} workers ready&quot;)
+
+  messages = SQS.receive_messages
+
+  Process.send(self(), :check_messages, [])
+
+  {:noreply, messages, state - Enum.count(messages)}
+end
+
+def handle_demand(demand, state) do
+  send(self(), :check_messages)
+
+  {:noreply, [], demand+state}
+end
+</code></pre>
+
+<p>As far as we could tell, the behaviour is the same.</p>
+
+<h3>Summary</h3>
+
+<p>There&#39;s a lot of moving parts to this architecture:</p>
+
+<pre><code>Supervisor -&gt; Producer + (ConsumerSupervisor -&gt; Processors)
+</code></pre>
+
+<p>However, for the amount of code needed, where a lot of it was boilerplate, it certainly felt quite easy to accomplish a rate-limited continuous background process that can recover when any of its parts fail.</p>
+
+<p>Thank you to <a href="https://elixir-slackin.herokuapp.com/">Elixir Slack</a> community for help figuring this out, in particular @sschneider and @hellopatrick (<a href="https://twitter.com/fells_init">Twitter</a>). Any feedback is appreciated, please post comments on Reddit or reach out to me (@tomasztomczyk) in Slack!</p>
+</main><footer class="border-t-4 border-gray-300 dark:border-gray-800 dark:text-gray-400 my-8 pt-8">
+  <nav>
+    <ul>
+      <li class="inline"><a href="https://github.com/tomasz-tomczyk" class="hover:text-gray-900 dark:hover:text-gray-200" target="_blank">
+
+      <svg class="inline h-6 w-6 fill-current" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+
+      GitHub</a></li>
+      <li class="ml-4 inline"><a href="https://www.linkedin.com/in/tomczyktomasz/" class="hover:text-blue-600 dark:hover:text-blue-400"  target="_blank">
+      <svg fill="#000000" xmlns="http://www.w3.org/2000/svg"  viewBox="0 0 30 30" class="inline h-6 w-6 fill-current">    <path d="M24,4H6C4.895,4,4,4.895,4,6v18c0,1.105,0.895,2,2,2h18c1.105,0,2-0.895,2-2V6C26,4.895,25.105,4,24,4z M10.954,22h-2.95 v-9.492h2.95V22z M9.449,11.151c-0.951,0-1.72-0.771-1.72-1.72c0-0.949,0.77-1.719,1.72-1.719c0.948,0,1.719,0.771,1.719,1.719 C11.168,10.38,10.397,11.151,9.449,11.151z M22.004,22h-2.948v-4.616c0-1.101-0.02-2.517-1.533-2.517 c-1.535,0-1.771,1.199-1.771,2.437V22h-2.948v-9.492h2.83v1.297h0.04c0.394-0.746,1.356-1.533,2.791-1.533 c2.987,0,3.539,1.966,3.539,4.522V22z"/></svg>
+      LinkedIn</a></li>
+    </ul>
+  </nav>
+</footer></main></body></html>

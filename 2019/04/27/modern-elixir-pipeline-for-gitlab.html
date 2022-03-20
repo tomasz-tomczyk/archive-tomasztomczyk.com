@@ -1,0 +1,352 @@
+<!DOCTYPE html><html><head><title>Still</title><meta charset="UTF-8"><meta content="width=device-width, initial-scale=1.0" name="viewport"><link rel="stylesheet" media=all href="/styles-IBMtMSY4EnsGezxBQo9jvg==.css" />
+</head><body class="dark:bg-gray-900 dark:text-neutral-400 bg-gray-200 text-neutral-600 px-4"><main class="container mx-auto mt-16"><h1 class="font-bold text-xl leading-none text-gray-900 dark:text-gray-100 mb-2">Tomasz Tomczyk</h1><p class="pb-8 md:w-96 border-t-8 border-gray-300 dark:border-gray-800 dark:text-gray-400">I'm a software engineer and technical lead based in the UK, using mainly Elixir for my work.</p><h1 class="font-bold text-2xl leading-none text-gray-900 dark:text-gray-100 mb-2">A modern Elixir pipeline for GitLab</h1><main class="lg:w-2/3"><p>I struggled finding an up to date guide or a template to GitLab pipelines for Elixir. I spent a lot of time tweaking my own and thought it might be useful to share.</p>
+
+<p><img src="/assets/images/posts/gitlab-pipeline-25224860-2296w.png" srcset="/assets/images/posts/gitlab-pipeline-25224860-574w.png 574w, /assets/images/posts/gitlab-pipeline-25224860-1148w.png 1148w, /assets/images/posts/gitlab-pipeline-25224860-1722w.png 1722w, /assets/images/posts/gitlab-pipeline-25224860-2296w.png 2296w"/></p>
+
+<p>First, let&#39;s take a look at the whole finished file and I&#39;ll explain my reasoning step by step below.</p>
+
+<pre><code class="language-yaml">image: elixir:1.10.2-alpine
+
+stages:
+  - build
+  - test
+  - release
+  - docker
+  - deploy
+
+.setup: &amp;setup
+  - apk add --no-cache git openssl
+  - mix local.hex --force
+  - mix local.rebar --force
+
+compile:
+  stage: build
+  before_script: *setup
+  variables:
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix deps.get
+    - mix do clean --only=test, format --check-formatted, compile --warnings-as-errors
+  artifacts:
+    paths:
+      - _build
+      - deps
+    untracked: true
+  cache:
+    untracked: true
+    key:
+      files:
+        - mix.lock
+    paths:
+      - deps
+      - _build
+
+test:
+  stage: test
+  before_script: *setup
+  services:
+    - postgres:latest
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: &quot;postgres&quot;
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix ecto.create
+    - mix ecto.migrate
+    - mix test
+
+credo:
+  stage: test
+  before_script: *setup
+  variables:
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix credo
+
+seeds:
+  stage: test
+  before_script: *setup
+  services:
+    - postgres:latest
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: &quot;postgres&quot;
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix ecto.reset
+
+release:
+  stage: release
+  before_script: *setup
+  variables:
+    MIX_ENV: &quot;prod&quot;
+  script:
+    - mix release
+  artifacts:
+    paths:
+      - _build
+    untracked: true
+
+docker:
+  stage: docker
+  image: docker:19.03-git
+  dependencies:
+    - release
+  services:
+    - docker:19.03-dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t &quot;project_name:${CI_COMMIT_SHORT_SHA}&quot; .
+    - docker push &quot;${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}&quot;
+
+.deploy:
+  stage: deploy
+  script:
+    # Deployment specific steps
+
+deploy:staging:
+  extends: .deploy
+  environment: staging
+  when: manual
+  variables: ...
+
+deploy:production:
+  extends: .deploy
+  environment: production
+  when: manual
+  variables: ...
+  only:
+    - develop
+</code></pre>
+
+<h3>Step by step</h3>
+
+<pre><code class="language-yaml">image: elixir:1.10.2-alpine
+</code></pre>
+
+<p>I would recommend pinning a specific version of your dependencies. I prefer Alpine distributions due to their lightweight nature. It&#39;s important to make sure the operating system matches the one where your application will run (for me, that&#39;s later specified in the Dockerfile).</p>
+
+<pre><code class="language-yaml">stages:
+  - build
+  - test
+  - release
+  - docker
+  - deploy
+</code></pre>
+
+<p>We override the default stages - it also serves nicely as a table of contents.</p>
+
+<pre><code class="language-yaml">.setup: &amp;setup
+  - apk add --no-cache git openssl
+  - mix local.hex --force
+  - mix local.rebar --force
+</code></pre>
+
+<p>This is GitLab&#39;s syntax for what they call <a href="https://docs.gitlab.com/ee/ci/yaml/#anchors">anchors</a>. It allows us to specify a script that can be reused throughout the file.</p>
+
+<p>Alpine images are great, but per the design they&#39;re pretty minimalistic - hence the added package that was needed to get through some of my builds. Try to keep the list minimal and only add what you need. Likewise, we need to add Hex and Rebar to be able to install our Elixir dependencies.</p>
+
+<p>This is the only common addition between the various steps of the build. Ideally, I would suggest expanding on the official Elixir Alpine image and pre-building it, to speed up your pipelines.</p>
+
+<pre><code class="language-yaml">compile:
+  stage: build
+  before_script:
+    *setup
+</code></pre>
+
+<p>Here&#39;s how we use the previously defined setup stage. You&#39;ll see this repeated a few times.</p>
+
+<pre><code class="language-yaml">variables:
+  MIX_ENV: &quot;test&quot;
+script:
+  - mix deps.get
+  - mix do clean --only=test, format --check-formatted, compile --warnings-as-errors
+</code></pre>
+
+<p>Here&#39;s where we fetch the depndencies and a check that the code has been formatted before compiling it. The main reason for the <code>MIX_ENV</code> setting there is so that the work here can be reused in the subsequent steps - where we run our tests. During the release step, we&#39;ll build a binary for production environment using releases.</p>
+
+<pre><code class="language-yaml">artifacts:
+  paths:
+    - _build
+    - deps
+  untracked: true
+</code></pre>
+
+<p>Artifacts allow you to keep files in between pipeline stages - read more about <a href="https://docs.gitlab.com/ee/ci/yaml/#dependencies">dependencies on GitLab</a>. It&#39;s important to specify that we&#39;re interested in keeping the <code>untracked</code> files, as otherwise GitLab will follow your <code>.gitignore</code> file and you likely have all of those paths ignored. These will be used to speed up the next steps of the pipeline.</p>
+
+<pre><code class="language-yaml">cache:
+  untracked: true
+  key:
+    files:
+      - mix.lock
+  paths:
+    - deps
+    - _build
+</code></pre>
+
+<p>In addition to artifacts, we specify a cache here for the same paths. Cache is kept between entire pipeline executions - it helps to speed it up again. The <code>files</code> key allows you to specify a file to be used as a key for the cache. Any time we update any of our packages, cache will be rebuilt. See more about <a href="https://docs.gitlab.com/ee/ci/yaml/#cachekeyfiles"><code>cache:key:files</code> on GitLab</a>.</p>
+
+<pre><code class="language-yaml">test:
+  stage: test
+  before_script:
+    *setup
+  services:
+    - postgres:latest
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: &quot;postgres&quot;
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix ecto.create
+    - mix ecto.migrate
+    - mix test
+</code></pre>
+
+<p>The only new thing here is that we can set up a PostgreSQL database through the use of <code>services</code> key. This will give us a database to work with for the purpose of the tests. See more about <a href="https://docs.gitlab.com/ee/ci/docker/using_docker_images.html#what-is-a-service">services on GitLab</a>.</p>
+
+<pre><code class="language-yaml">credo:
+  stage: test
+  before_script:
+    *setup
+  variables:
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix credo
+</code></pre>
+
+<p><a href="https://github.com/rrrene/credo">Credo</a> is a static code analysis tool. This will help you catch a number of issues and helps achieve more consistent code.</p>
+
+<p>The only reason to use <code>MIX_ENV=test</code> here is to avoid having to do recompilation, as that&#39;s how we&#39;ve compiled earlier for the purpose of tests. I don&#39;t believe this impacts much for Credo itself and the things it finds.</p>
+
+<pre><code class="language-yaml">seeds:
+  stage: test
+  before_script:
+    *setup
+  services:
+    - postgres:latest
+  variables:
+    POSTGRES_DB: test
+    POSTGRES_HOST: postgres
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: &quot;postgres&quot;
+    MIX_ENV: &quot;test&quot;
+  script:
+    - mix ecto.create
+    - mix ecto.migrate
+    - mix run priv/repo/seeds.exs
+</code></pre>
+
+<p>Once again we use the <code>postgres</code> service to have a database run through our seeds.</p>
+
+<p>The <code>credo</code>, <code>seeds</code> and <code>test</code> jobs in the pipeline run in parallel thanks to the <code>stage: test</code> key.</p>
+
+<pre><code class="language-yaml">release:
+  stage: release
+  before_script:
+    *setup
+  variables:
+    MIX_ENV: &quot;prod&quot;
+  script:
+    - mix release
+  artifacts:
+    paths:
+      - _build
+    untracked: true
+</code></pre>
+
+<p>This is where we make use of Elixir releases to get a binary out. At this point it&#39;s important we use production environment. We keep the <code>_build</code> directory as an artifact for the next step.</p>
+
+<pre><code class="language-yaml">docker:
+  stage: docker
+  image: docker:19.03-git
+</code></pre>
+
+<p>We switch from using an Elixir Docker image to a Docker with git image. This is because we&#39;ve now got everything we needed from Elixir, we have the final binary in place.</p>
+
+<pre><code class="language-yaml">dependencies:
+  - release
+</code></pre>
+
+<p>If we didn&#39;t specify that we specifically depend on the <code>release</code> stage, all previous artifacts would be downloaded - this is a minor improvement.</p>
+
+<pre><code class="language-yaml">services:
+  - docker:19.03-dind
+script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  - docker build --build-arg APP_NAME=${APP_NAME} -t &quot;$(APP_NAME):${CI_COMMIT_SHORT_SHA}&quot; .
+  - docker push &quot;${CI_REGISTRY_IMAGE}:${CI_COMMIT_SHORT_SHA}&quot;
+</code></pre>
+
+<p>In general, your Docker / deployment steps will be quite custom to your project &amp; company. I&#39;d suggest keeping it simple - you can use the GitLab registry to store the images. <code>APP_NAME</code> is something you can specify in your pipeline environment variables, so that it&#39;s easier to reuse the whole pipeline file between projects and make changes.</p>
+
+<p>You can use the <code>CI_COMMIT_SHORT_SHA</code> variable to tag your images easily.</p>
+
+<h3>Deployment</h3>
+
+<p>I did not include much details in the deployment steps as it largely depends on how you operate. General advice that might be useful:</p>
+
+<pre><code class="language-yaml">.deploy:
+  stage: deploy
+  script:
+    # Deployment specific steps
+</code></pre>
+
+<p>I would suggest trying to keep staging &amp; production deployment steps as similar as you can - having a reusable anchor helps</p>
+
+<pre><code class="language-yaml">environment: staging
+</code></pre>
+
+<p>Specifying <code>environment</code> key here allows your pipeline to pull environment specific values from your repo&#39;s configuration - see more about <a href="https://docs.gitlab.com/ee/ci/variables/">variables on GitLab</a>.</p>
+
+<pre><code>  when: manual
+</code></pre>
+
+<p>Thanks to this you can use GitLab Pipeline UI as your deployment tool.</p>
+
+<pre><code class="language-yaml">only:
+  - develop
+</code></pre>
+
+<p>Finally, consider only allowing production deployments from your <code>develop</code> or <code>master</code> branch.</p>
+
+<h3>Dockerfile</h3>
+
+<p>Given you have a binary made in the release step, your <code>Dockerfile</code> can be as simple as the following:</p>
+
+<pre><code class="language-docker">FROM alpine:3.11
+
+ARG APP_NAME
+
+ENV REPLACE_OS_VARS=true
+ENV APP_NAME=${APP_NAME}
+ENV MIX_ENV=prod
+ENV INSTALL_PATH=/app
+
+RUN mkdir -p ${INSTALL_PATH}
+
+WORKDIR ${INSTALL_PATH}
+
+COPY _build/${MIX_ENV}/rel/${APP_NAME}/ &quot;${INSTALL_PATH}/&quot;
+
+ENTRYPOINT [&quot;/bin/sh&quot;, &quot;-c&quot;, &quot;${APP_NAME} start&quot;]
+</code></pre>
+</main><footer class="border-t-4 border-gray-300 dark:border-gray-800 dark:text-gray-400 my-8 pt-8">
+  <nav>
+    <ul>
+      <li class="inline"><a href="https://github.com/tomasz-tomczyk" class="hover:text-gray-900 dark:hover:text-gray-200" target="_blank">
+
+      <svg class="inline h-6 w-6 fill-current" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><title>GitHub</title><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+
+      GitHub</a></li>
+      <li class="ml-4 inline"><a href="https://www.linkedin.com/in/tomczyktomasz/" class="hover:text-blue-600 dark:hover:text-blue-400"  target="_blank">
+      <svg fill="#000000" xmlns="http://www.w3.org/2000/svg"  viewBox="0 0 30 30" class="inline h-6 w-6 fill-current">    <path d="M24,4H6C4.895,4,4,4.895,4,6v18c0,1.105,0.895,2,2,2h18c1.105,0,2-0.895,2-2V6C26,4.895,25.105,4,24,4z M10.954,22h-2.95 v-9.492h2.95V22z M9.449,11.151c-0.951,0-1.72-0.771-1.72-1.72c0-0.949,0.77-1.719,1.72-1.719c0.948,0,1.719,0.771,1.719,1.719 C11.168,10.38,10.397,11.151,9.449,11.151z M22.004,22h-2.948v-4.616c0-1.101-0.02-2.517-1.533-2.517 c-1.535,0-1.771,1.199-1.771,2.437V22h-2.948v-9.492h2.83v1.297h0.04c0.394-0.746,1.356-1.533,2.791-1.533 c2.987,0,3.539,1.966,3.539,4.522V22z"/></svg>
+      LinkedIn</a></li>
+    </ul>
+  </nav>
+</footer></main></body></html>
